@@ -31,7 +31,7 @@ const en = {
       { value: "10–15%", label: "typical savings on a monthly basket" },
       { value: "30", label: "non-perishable staples, fixed prices" },
       { value: "1", label: "wholesale drop-off per building" },
-      { value: "0", label: "speculative stock: we buy only what's paid for" },
+      { value: "0", label: "speculative orders: we buy only for paid demand" },
     ],
     problemTitle: "Why households overpay today",
     problemBody:
@@ -285,7 +285,7 @@ const ur: Dictionary = {
       { value: "۱۰–۱۵٪", label: "ماہانہ ٹوکری پر عام بچت" },
       { value: "۳۰", label: "دیرپا ضروری اشیاء، مقررہ قیمت" },
       { value: "۱", label: "ہر بلڈنگ میں ایک ہول سیل ڈیلیوری" },
-      { value: "۰", label: "اضافی اسٹاک: صرف ادا شدہ آرڈر خریدے جاتے ہیں" },
+      { value: "۰", label: "قیاسی آرڈر: صرف ادا شدہ طلب کے لیے خریداری" },
     ],
     problemTitle: "گھرانے آج زیادہ کیوں ادا کرتے ہیں",
     problemBody:
