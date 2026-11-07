@@ -309,7 +309,7 @@ create table public.purchase_orders (
 create table public.po_lines (
   id uuid primary key default gen_random_uuid(),
   po_id uuid not null references public.purchase_orders (id) on delete cascade,
-  lot_id uuid not null references public.demand_lots (id),
+  lot_id uuid not null references public.demand_lots (id) on delete cascade,
   bulk_qty integer not null check (bulk_qty > 0),
   unit_price_bulk numeric(12, 2) not null
 );

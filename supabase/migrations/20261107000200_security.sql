@@ -258,6 +258,12 @@ $$;
 create trigger on_auth_user_created after insert on auth.users
   for each row execute function public.handle_new_user();
 
+-- Backfill: accounts created before this migration ran get a (resident) profile too.
+insert into public.profiles (id, full_name, phone)
+select u.id, coalesce(u.raw_user_meta_data ->> 'full_name', ''), coalesce(u.phone, u.raw_user_meta_data ->> 'phone')
+from auth.users u
+on conflict (id) do nothing;
+
 -- Suppliers can't verify themselves or set their own rating.
 create or replace function public.guard_supplier()
 returns trigger language plpgsql set search_path = ''

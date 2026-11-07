@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:test": "bash scripts/db-test.sh",
-    "seed:users": "node --env-file=.env.local scripts/seed-users.ts"
+    "seed:users": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/seed-users.ts",
+    "db:apply": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/db-apply.mjs",
+    "test:e2e": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/e2e-flow.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

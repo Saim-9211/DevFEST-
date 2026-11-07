@@ -35,13 +35,19 @@ export type SessionContext = {
   supplier: SupplierLink | null;
 };
 
-/** Signed-in user's profile, memberships and supplier link. Cached per request. */
-export const getSessionContext = cache(async (): Promise<SessionContext | null> => {
+/** The Supabase Auth user (no database lookups). Cached per request. */
+export const getAuthUser = cache(async () => {
   if (!isSupabaseConfigured) return null;
   const supabase = await createClient();
-  const { data: userData } = await supabase.auth.getUser();
-  const user = userData.user;
+  const { data } = await supabase.auth.getUser();
+  return data.user ?? null;
+});
+
+/** Signed-in user's profile, memberships and supplier link. Cached per request. */
+export const getSessionContext = cache(async (): Promise<SessionContext | null> => {
+  const user = await getAuthUser();
   if (!user) return null;
+  const supabase = await createClient();
 
   const [{ data: profile }, { data: memberships }, { data: supplierRows }] = await Promise.all([
     supabase.from("profiles").select("id, full_name, phone, role, locale, upfront_only, no_show_count").eq("id", user.id).single(),
@@ -90,7 +96,8 @@ export type Area = "resident" | "ambassador" | "agent" | "supplier" | "admin";
 /** Server-side guard for an area's layout and actions. Redirects instead of rendering for the wrong role. */
 export async function requireArea(area: Area): Promise<SessionContext> {
   const ctx = await getSessionContext();
-  if (!ctx) redirect(`/login?next=/${area}`);
+  // Signed in but no profile row (e.g. database not set up): explain on /dashboard instead of looping to /login.
+  if (!ctx) redirect((await getAuthUser()) ? "/dashboard" : `/login?next=/${area}`);
 
   const allowed = {
     admin: ctx.profile.role === "admin",
