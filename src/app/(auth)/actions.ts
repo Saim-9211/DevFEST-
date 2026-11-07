@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isSupabaseConfigured } from "@/lib/env";
+import { isSupabaseConfigured, missingSupabaseEnv } from "@/lib/env";
 import { getDictionary } from "@/lib/i18n";
 import { normalizePkPhone } from "@/lib/phone";
 import type { FormState } from "@/components/form";
@@ -18,7 +18,7 @@ function safeNext(value: FormDataEntryValue | null, fallback = "/dashboard") {
 async function notConfigured(): Promise<FormState | null> {
   if (isSupabaseConfigured) return null;
   const { t } = await getDictionary();
-  return { error: t.auth.notConfigured };
+  return { error: `${t.auth.notConfigured} ${missingSupabaseEnv().join(", ")}` };
 }
 
 const loginSchema = z.object({

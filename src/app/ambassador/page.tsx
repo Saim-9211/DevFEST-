@@ -5,6 +5,7 @@ import { getDictionary } from "@/lib/i18n";
 import { getBuildingProgress, getCurrentCycle, toBasket, type Basket } from "@/lib/data";
 import { createClient } from "@/lib/supabase/server";
 import { formatPKR } from "@/lib/utils";
+import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/env";
 import { BuildingProgress } from "@/components/building-progress";
 import { CycleCard } from "@/components/cycle-card";
 import { HandoverForm } from "@/components/handover-form";
@@ -63,7 +64,7 @@ export default async function AmbassadorHome() {
 
   return (
     <div className="space-y-6">
-      <LiveRefresh channel={`building-${building.id}`} tables={["baskets", "building_members"]} filter={`building_id=eq.${building.id}`} />
+      <LiveRefresh channel={`building-${building.id}`} tables={["baskets", "building_members"]} filter={`building_id=eq.${building.id}`} supabaseUrl={SUPABASE_URL} supabaseKey={SUPABASE_ANON_KEY} />
       <div>
         <h1 className="text-2xl font-semibold">{a.title}</h1>
         <p className="text-muted-foreground">{building.name}</p>

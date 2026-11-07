@@ -110,7 +110,7 @@ const en = {
     code: "6-digit code",
     verifyCode: "Verify and log in",
     codeSent: "We sent a code to your phone.",
-    notConfigured: "Supabase isn't configured yet. Copy .env.example to .env.local and add your project URL and keys.",
+    notConfigured: "Supabase isn't configured on this server. Set these environment variables (on Vercel: Settings → Environment Variables, for Production), then redeploy:",
   },
   onboarding: {
     title: "Welcome! How will you use CollectiveCart?",
@@ -363,7 +363,7 @@ const ur: Dictionary = {
     code: "۶ ہندسوں کا کوڈ",
     verifyCode: "تصدیق کریں اور لاگ اِن کریں",
     codeSent: "ہم نے آپ کے فون پر کوڈ بھیج دیا ہے۔",
-    notConfigured: "سپا بیس ابھی سیٹ نہیں ہے۔ ‎.env.example‎ کو ‎.env.local‎ میں کاپی کر کے پروجیکٹ کی تفصیلات شامل کریں۔",
+    notConfigured: "اس سرور پر سپا بیس سیٹ نہیں ہے۔ یہ انوائرنمنٹ ویری ایبلز سیٹ کریں (ورسل پر: Settings → Environment Variables، Production کے لیے)، پھر دوبارہ ڈیپلائے کریں:",
   },
   onboarding: {
     title: "خوش آمدید! آپ کلیکٹو کارٹ کیسے استعمال کریں گے؟",

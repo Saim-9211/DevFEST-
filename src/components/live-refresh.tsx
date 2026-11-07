@@ -9,10 +9,23 @@ import { createClient } from "@/lib/supabase/client";
  * RLS still applies to what the page reads; this only triggers a refresh.
  * Requires the tables to be in the `supabase_realtime` publication (see migrations).
  */
-export function LiveRefresh({ channel, tables, filter }: { channel: string; tables: string[]; filter?: string }) {
+export function LiveRefresh({
+  channel,
+  tables,
+  filter,
+  supabaseUrl,
+  supabaseKey,
+}: {
+  channel: string;
+  tables: string[];
+  filter?: string;
+  supabaseUrl: string;
+  supabaseKey: string;
+}) {
   const router = useRouter();
   useEffect(() => {
-    const supabase = createClient();
+    if (!supabaseUrl || !supabaseKey) return;
+    const supabase = createClient(supabaseUrl, supabaseKey);
     let ch = supabase.channel(channel);
     for (const table of tables) {
       ch = ch.on("postgres_changes", { event: "*", schema: "public", table, filter }, () => router.refresh());
@@ -21,6 +34,6 @@ export function LiveRefresh({ channel, tables, filter }: { channel: string; tabl
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [channel, tables, filter, router]);
+  }, [channel, tables, filter, router, supabaseUrl, supabaseKey]);
   return null;
 }
