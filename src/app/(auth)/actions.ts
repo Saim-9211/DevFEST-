@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { isSupabaseConfigured } from "@/lib/env";
 import { getDictionary } from "@/lib/i18n";
 import { normalizePkPhone } from "@/lib/phone";
@@ -57,21 +58,36 @@ export async function signUp(_: FormState, formData: FormData): Promise<FormStat
     phone = normalized;
   }
 
-  const { locale, t } = await getDictionary();
-  const supabase = await createClient();
+  const { locale } = await getDictionary();
   const asSupplier = formData.get("as") === "supplier";
-  const { data, error } = await supabase.auth.signUp({
+
+  // Create the account already confirmed (no verification email), regardless of the
+  // project's "Confirm email" setting. Needs the server-only service-role key.
+  // Role is never taken from metadata; the DB trigger always creates a 'resident' profile.
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch {
+    return { error: "Sign-up is not configured: SUPABASE_SERVICE_ROLE_KEY is missing on the server." };
+  }
+  const { error: createError } = await admin.auth.admin.createUser({
     email: parsed.data.email,
     password: parsed.data.password,
-    options: {
-      // Role is never taken from metadata; the DB trigger always creates a 'resident' profile.
-      data: { full_name: parsed.data.full_name, phone, locale },
-    },
+    email_confirm: true,
+    user_metadata: { full_name: parsed.data.full_name, phone, locale },
   });
-  if (error) return { error: error.message };
+  if (createError) {
+    const exists = createError.status === 422 || /already/i.test(createError.message);
+    return { error: exists ? "An account with this email already exists. Please log in." : createError.message };
+  }
 
-  // Email confirmation enabled: no session yet.
-  if (!data.session) return { success: t.auth.checkEmail };
+  // Sign the new user in right away (sets the session cookie).
+  const supabase = await createClient();
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email: parsed.data.email,
+    password: parsed.data.password,
+  });
+  if (signInError) return { error: signInError.message };
   redirect(asSupplier ? "/onboarding?as=supplier" : "/onboarding");
 }
 

@@ -110,7 +110,6 @@ const en = {
     code: "6-digit code",
     verifyCode: "Verify and log in",
     codeSent: "We sent a code to your phone.",
-    checkEmail: "Account created. If email confirmation is on, check your inbox, then log in.",
     notConfigured: "Supabase isn't configured yet. Copy .env.example to .env.local and add your project URL and keys.",
   },
   onboarding: {
@@ -364,7 +363,6 @@ const ur: Dictionary = {
     code: "۶ ہندسوں کا کوڈ",
     verifyCode: "تصدیق کریں اور لاگ اِن کریں",
     codeSent: "ہم نے آپ کے فون پر کوڈ بھیج دیا ہے۔",
-    checkEmail: "اکاؤنٹ بن گیا۔ اگر ای میل تصدیق آن ہے تو ان باکس دیکھیں، پھر لاگ اِن کریں۔",
     notConfigured: "سپا بیس ابھی سیٹ نہیں ہے۔ ‎.env.example‎ کو ‎.env.local‎ میں کاپی کر کے پروجیکٹ کی تفصیلات شامل کریں۔",
   },
   onboarding: {
