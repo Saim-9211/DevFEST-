@@ -1,0 +1,102 @@
+"use server";
+
+import { redirect } from "next/navigation";
+import { z } from "zod";
+import { createClient } from "@/lib/supabase/server";
+import { isSupabaseConfigured } from "@/lib/env";
+import { getDictionary } from "@/lib/i18n";
+import { normalizePkPhone } from "@/lib/phone";
+import type { FormState } from "@/components/form";
+
+/** Only allow same-site relative redirects (blocks open redirects like //evil.com). */
+function safeNext(value: FormDataEntryValue | null, fallback = "/dashboard") {
+  const v = typeof value === "string" ? value : "";
+  return v.startsWith("/") && !v.startsWith("//") && !v.startsWith("/\\") ? v : fallback;
+}
+
+async function notConfigured(): Promise<FormState | null> {
+  if (isSupabaseConfigured) return null;
+  const { t } = await getDictionary();
+  return { error: t.auth.notConfigured };
+}
+
+const loginSchema = z.object({
+  email: z.email("Enter a valid email"),
+  password: z.string().min(1, "Enter your password"),
+});
+
+export async function signInWithPassword(_: FormState, formData: FormData): Promise<FormState> {
+  const nc = await notConfigured();
+  if (nc) return nc;
+  const parsed = loginSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const supabase = await createClient();
+  const { error } = await supabase.auth.signInWithPassword(parsed.data);
+  if (error) return { error: error.message };
+  redirect(safeNext(formData.get("next")));
+}
+
+const signupSchema = z.object({
+  full_name: z.string().trim().min(2, "Enter your full name").max(80),
+  email: z.email("Enter a valid email"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
+  phone: z.string().trim().optional(),
+});
+
+export async function signUp(_: FormState, formData: FormData): Promise<FormState> {
+  const nc = await notConfigured();
+  if (nc) return nc;
+  const parsed = signupSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  let phone: string | undefined;
+  if (parsed.data.phone) {
+    const normalized = normalizePkPhone(parsed.data.phone);
+    if (!normalized) return { error: "Enter a valid Pakistani mobile number, e.g. 03001234567" };
+    phone = normalized;
+  }
+
+  const { locale, t } = await getDictionary();
+  const supabase = await createClient();
+  const asSupplier = formData.get("as") === "supplier";
+  const { data, error } = await supabase.auth.signUp({
+    email: parsed.data.email,
+    password: parsed.data.password,
+    options: {
+      // Role is never taken from metadata; the DB trigger always creates a 'resident' profile.
+      data: { full_name: parsed.data.full_name, phone, locale },
+    },
+  });
+  if (error) return { error: error.message };
+
+  // Email confirmation enabled: no session yet.
+  if (!data.session) return { success: t.auth.checkEmail };
+  redirect(asSupplier ? "/onboarding?as=supplier" : "/onboarding");
+}
+
+export async function sendPhoneOtp(_: FormState, formData: FormData): Promise<FormState> {
+  const nc = await notConfigured();
+  if (nc) return nc;
+  const phone = normalizePkPhone(String(formData.get("phone") ?? ""));
+  if (!phone) return { error: "Enter a valid Pakistani mobile number, e.g. 03001234567" };
+
+  const supabase = await createClient();
+  const { error } = await supabase.auth.signInWithOtp({ phone });
+  if (error) return { error: error.message };
+  const { t } = await getDictionary();
+  return { success: t.auth.codeSent };
+}
+
+export async function verifyPhoneOtp(_: FormState, formData: FormData): Promise<FormState> {
+  const nc = await notConfigured();
+  if (nc) return nc;
+  const phone = normalizePkPhone(String(formData.get("phone") ?? ""));
+  const token = String(formData.get("token") ?? "").trim();
+  if (!phone || !/^\d{6}$/.test(token)) return { error: "Enter the 6-digit code" };
+
+  const supabase = await createClient();
+  const { error } = await supabase.auth.verifyOtp({ phone, token, type: "sms" });
+  if (error) return { error: error.message };
+  redirect(safeNext(formData.get("next")));
+}
