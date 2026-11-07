@@ -1,14 +1,11 @@
 /**
- * Pricing math shared by the UI. Mirrors the SQL functions `estimate_unit_price`
- * and `price_basket_item` in supabase/migrations so the numbers on screen match
- * what the database stores.
+ * Pricing math shared by the UI. Mirrors the SQL in supabase/migrations so the numbers on screen
+ * match what the database stores (`_recalc_basket`, `run_cutoff`, `admin_cycle_kpis`).
  *
- * Units:
- *  - household unit: what a family orders (e.g. a 10 kg atta bag)
- *  - bulk unit: what a supplier sells (e.g. a 50 kg sack = 5 household units)
+ * V2 model: each cycle has a fixed offer price per SKU. Residents pay a deposit (10-20%) when
+ * ordering and the balance at pickup. The platform earns the spread between the offer price and
+ * the wholesale cost. Savings are communicated per basket, not as a flat % per item.
  */
-
-export type PriceTier = { min_bulk_units: number; est_unit_price: number };
 
 /** Bulk units a supplier must ship to cover `householdUnits` (always rounds up). */
 export function toBulkUnits(householdUnits: number, splitFactor: number): number {
@@ -17,62 +14,49 @@ export function toBulkUnits(householdUnits: number, splitFactor: number): number
   return Math.ceil(householdUnits / splitFactor);
 }
 
-/** Household units left over after rounding up to whole bulk units. */
+/** Household units left over after rounding up to whole bulk units (surplus stock). */
 export function leftoverUnits(householdUnits: number, splitFactor: number): number {
   return toBulkUnits(householdUnits, splitFactor) * splitFactor - Math.max(householdUnits, 0);
 }
 
-/** Highest tier whose threshold is met, or undefined if none applies. */
-export function currentTier(tiers: PriceTier[], bulkUnits: number): PriceTier | undefined {
-  return [...tiers]
-    .sort((a, b) => b.min_bulk_units - a.min_bulk_units)
-    .find((t) => t.min_bulk_units <= Math.max(bulkUnits, 0));
+export type BasketLine = { qty: number; unit_price: number; retail_price: number };
+
+/** Basket total, retail benchmark and savings. */
+export function basketTotals(lines: BasketLine[]) {
+  const total = lines.reduce((s, l) => s + l.qty * l.unit_price, 0);
+  const retail = lines.reduce((s, l) => s + l.qty * l.retail_price, 0);
+  const savings = retail - total;
+  return { total, retail, savings, savingsPct: retail > 0 ? savings / retail : 0 };
 }
 
-/** The next cheaper tier above the current demand, if any. */
-export function nextTier(tiers: PriceTier[], bulkUnits: number): PriceTier | undefined {
-  return [...tiers]
-    .sort((a, b) => a.min_bulk_units - b.min_bulk_units)
-    .find((t) => t.min_bulk_units > Math.max(bulkUnits, 0));
+/** Deposit (rounded up to the rupee) and balance due at pickup. Upfront-only households pay 100%. */
+export function depositSplit(total: number, depositPct: number, upfront = false) {
+  const deposit = upfront ? total : Math.ceil((total * depositPct) / 100);
+  return { deposit, balance: Math.max(total - deposit, 0) };
 }
 
-/** Estimated price per household unit; falls back to the retail benchmark. */
-export function estimateUnitPrice(
-  tiers: PriceTier[],
-  bulkUnits: number,
-  referenceRetailPrice: number,
-): number {
-  return currentTier(tiers, bulkUnits)?.est_unit_price ?? referenceRetailPrice;
+/** Per-unit savings vs the retail benchmark. */
+export function unitSavings(retailPrice: number, offerPrice: number) {
+  return { amount: retailPrice - offerPrice, pct: retailPrice > 0 ? (retailPrice - offerPrice) / retailPrice : 0 };
 }
 
-/**
- * Progress (0..1) from the current tier threshold toward the next one, plus how many
- * more household units the cluster needs to unlock it.
- */
-export function tierProgress(tiers: PriceTier[], householdUnits: number, splitFactor: number) {
-  const bulk = toBulkUnits(householdUnits, splitFactor);
-  const next = nextTier(tiers, bulk);
-  if (!next) return { progress: 1, unitsToNext: 0, next: undefined };
-  const fromBulk = currentTier(tiers, bulk)?.min_bulk_units ?? 0;
-  const fromUnits = fromBulk * splitFactor;
-  const toUnits = next.min_bulk_units * splitFactor;
-  const span = Math.max(toUnits - fromUnits, 1);
+/** Platform spread per household unit given a rate card. */
+export function lineMargin(offerPrice: number, pricePerBulk: number, splitFactor: number) {
+  const unitCost = pricePerBulk / splitFactor;
+  const amount = offerPrice - unitCost;
+  return { unitCost, amount, pct: offerPrice > 0 ? amount / offerPrice : 0 };
+}
+
+export type Minimum = { min_households: number; min_order_value: number };
+
+/** Has a building reached this cycle's minimum? Progress is the weaker of the two measures. */
+export function meetsMinimum(households: number, orderValue: number, min: Minimum) {
+  const hh = min.min_households > 0 ? households / min.min_households : 1;
+  const val = min.min_order_value > 0 ? orderValue / min.min_order_value : 1;
   return {
-    progress: Math.min(Math.max((householdUnits - fromUnits) / span, 0), 1),
-    unitsToNext: Math.max(toUnits - householdUnits, 0),
-    next,
+    met: households >= min.min_households && orderValue >= min.min_order_value,
+    progress: Math.min(Math.min(hh, val), 1),
+    householdsShort: Math.max(min.min_households - households, 0),
+    valueShort: Math.max(min.min_order_value - orderValue, 0),
   };
-}
-
-/** Savings vs the retail benchmark, in PKR and as a fraction (0.2 = 20%). */
-export function savings(referenceRetailPrice: number, unitPrice: number, qty = 1) {
-  const amount = (referenceRetailPrice - unitPrice) * qty;
-  const pct = referenceRetailPrice > 0 ? (referenceRetailPrice - unitPrice) / referenceRetailPrice : 0;
-  return { amount, pct };
-}
-
-/** Final per-household price after award: bulk bid split across households plus the service fee. */
-export function finalHouseholdPrice(bidUnitPriceBulk: number, splitFactor: number, serviceFeePct: number) {
-  const base = bidUnitPriceBulk / splitFactor;
-  return Math.round(base * (1 + serviceFeePct / 100) * 100) / 100;
 }

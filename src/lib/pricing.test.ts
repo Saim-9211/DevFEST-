@@ -1,74 +1,70 @@
 import { describe, expect, it } from "vitest";
-import {
-  currentTier,
-  estimateUnitPrice,
-  finalHouseholdPrice,
-  leftoverUnits,
-  nextTier,
-  savings,
-  tierProgress,
-  toBulkUnits,
-} from "./pricing";
-
-// Mirrors the seed: Chakki Atta 10 kg, retail 1450, split 5 (50 kg sack)
-const tiers = [
-  { min_bulk_units: 0, est_unit_price: 1378 },
-  { min_bulk_units: 5, est_unit_price: 1276 },
-  { min_bulk_units: 20, est_unit_price: 1160 },
-];
+import { basketTotals, depositSplit, leftoverUnits, lineMargin, meetsMinimum, toBulkUnits, unitSavings } from "./pricing";
 
 describe("bulk conversion", () => {
   it("rounds household units up to whole bulk units", () => {
     expect(toBulkUnits(0, 5)).toBe(0);
-    expect(toBulkUnits(1, 5)).toBe(1);
     expect(toBulkUnits(5, 5)).toBe(1);
     expect(toBulkUnits(6, 5)).toBe(2);
-    expect(toBulkUnits(1200 / 10, 5)).toBe(24); // 1,200 kg of atta in 10 kg bags -> 24 sacks
   });
-  it("computes leftovers from rounding", () => {
+  it("computes surplus from rounding", () => {
     expect(leftoverUnits(6, 5)).toBe(4);
     expect(leftoverUnits(10, 5)).toBe(0);
-    expect(leftoverUnits(0, 5)).toBe(0);
   });
   it("rejects invalid split factors", () => {
     expect(() => toBulkUnits(3, 0)).toThrow();
   });
 });
 
-describe("tiers", () => {
-  it("picks the highest tier whose threshold is met", () => {
-    expect(currentTier(tiers, 0)?.est_unit_price).toBe(1378);
-    expect(currentTier(tiers, 4)?.est_unit_price).toBe(1378);
-    expect(currentTier(tiers, 5)?.est_unit_price).toBe(1276);
-    expect(currentTier(tiers, 50)?.est_unit_price).toBe(1160);
+describe("basket", () => {
+  // Same basket as the SQL test: 2 atta, 3 daal chana, 2 salt
+  const lines = [
+    { qty: 2, unit_price: 1260, retail_price: 1500 },
+    { qty: 3, unit_price: 272, retail_price: 340 },
+    { qty: 2, unit_price: 56, retail_price: 60 },
+  ];
+  it("totals and savings match the database", () => {
+    const t = basketTotals(lines);
+    expect(t.total).toBe(3448);
+    expect(t.retail).toBe(4140);
+    expect(t.savings).toBe(692);
+    expect(t.savingsPct).toBeCloseTo(0.167, 3);
   });
-  it("finds the next tier", () => {
-    expect(nextTier(tiers, 0)?.min_bulk_units).toBe(5);
-    expect(nextTier(tiers, 20)).toBeUndefined();
+  it("splits a 20% deposit rounded up, matching the SQL (3448 -> 690)", () => {
+    expect(depositSplit(3448, 20)).toEqual({ deposit: 690, balance: 2758 });
   });
-  it("falls back to retail when no tiers exist", () => {
-    expect(estimateUnitPrice([], 10, 1450)).toBe(1450);
+  it("charges upfront-only households 100%", () => {
+    expect(depositSplit(3448, 20, true)).toEqual({ deposit: 3448, balance: 0 });
   });
-  it("matches the SQL test case: 25 bags = 5 sacks = tier 1", () => {
-    expect(estimateUnitPrice(tiers, toBulkUnits(25, 5), 1450)).toBe(1276);
-  });
-  it("reports progress toward the next tier", () => {
-    const p = tierProgress(tiers, 20, 5); // 4 sacks, next tier at 5 sacks (25 bags)
-    expect(p.unitsToNext).toBe(5);
-    expect(p.next?.min_bulk_units).toBe(5);
-    expect(p.progress).toBeCloseTo(20 / 25);
-    expect(tierProgress(tiers, 500, 5).progress).toBe(1);
+  it("handles an empty basket", () => {
+    expect(basketTotals([]).savingsPct).toBe(0);
+    expect(depositSplit(0, 20)).toEqual({ deposit: 0, balance: 0 });
   });
 });
 
-describe("savings and final price", () => {
-  it("computes savings vs retail", () => {
-    const s = savings(1450, 1160, 2);
-    expect(s.amount).toBe(580);
-    expect(s.pct).toBeCloseTo(0.2);
+describe("margin and savings", () => {
+  it("computes per-unit savings", () => {
+    expect(unitSavings(1500, 1260).pct).toBeCloseTo(0.16);
   });
-  it("splits a bulk bid per household and adds the service fee", () => {
-    // 5,600 per 50 kg sack -> 1,120 per 10 kg bag, + 2.5% fee = 1,148
-    expect(finalHouseholdPrice(5600, 5, 2.5)).toBe(1148);
+  it("computes the platform spread from a bulk rate card", () => {
+    const m = lineMargin(1260, 5796, 5); // 50 kg sack at 5,796 -> 1,159.20 per 10 kg bag
+    expect(m.unitCost).toBeCloseTo(1159.2);
+    expect(m.amount).toBeCloseTo(100.8);
+    expect(m.pct).toBeCloseTo(0.08);
+  });
+});
+
+describe("building minimum", () => {
+  const min = { min_households: 8, min_order_value: 120000 };
+  it("needs both households and value", () => {
+    expect(meetsMinimum(9, 131000, min).met).toBe(true);
+    expect(meetsMinimum(9, 100000, min).met).toBe(false);
+    expect(meetsMinimum(5, 130000, min).met).toBe(false);
+  });
+  it("reports progress as the weaker measure", () => {
+    const r = meetsMinimum(4, 90000, min);
+    expect(r.progress).toBeCloseTo(0.5);
+    expect(r.householdsShort).toBe(4);
+    expect(r.valueShort).toBe(30000);
   });
 });

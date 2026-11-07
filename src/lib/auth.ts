@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/env";
 
-export type AppRole = "resident" | "supplier" | "admin";
+export type AppRole = "resident" | "supplier" | "agent" | "admin";
 
 export type Profile = {
   id: string;
@@ -12,13 +12,15 @@ export type Profile = {
   phone: string | null;
   role: AppRole;
   locale: "en" | "ur";
+  upfront_only: boolean;
+  no_show_count: number;
 };
 
 export type Membership = {
   id: string;
   building_id: string;
   flat_no: string;
-  member_role: "resident" | "captain";
+  member_role: "resident" | "ambassador";
   status: "pending" | "approved" | "rejected";
   building: { id: string; name: string; city: string; cluster_id: string | null; total_flats: number };
 };
@@ -42,27 +44,22 @@ export const getSessionContext = cache(async (): Promise<SessionContext | null> 
   if (!user) return null;
 
   const [{ data: profile }, { data: memberships }, { data: supplierRows }] = await Promise.all([
-    supabase.from("profiles").select("id, full_name, phone, role, locale").eq("id", user.id).single(),
+    supabase.from("profiles").select("id, full_name, phone, role, locale, upfront_only, no_show_count").eq("id", user.id).single(),
     supabase
       .from("building_members")
       .select("id, building_id, flat_no, member_role, status, building:buildings(id, name, city, cluster_id, total_flats)")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false }),
-    supabase
-      .from("supplier_users")
-      .select("supplier:suppliers(id, business_name, verified, city)")
-      .eq("user_id", user.id)
-      .limit(1),
+    supabase.from("supplier_users").select("supplier:suppliers(id, business_name, verified, city)").eq("user_id", user.id).limit(1),
   ]);
-
-  if (!profile) return null; // profile row is created by a DB trigger on sign-up
+  if (!profile) return null; // created by a DB trigger on sign-up
 
   return {
     userId: user.id,
     email: user.email ?? null,
     profile: profile as Profile,
     memberships: (memberships ?? []) as unknown as Membership[],
-    supplier: ((supplierRows?.[0]?.supplier ?? null) as unknown as SupplierLink | null),
+    supplier: (supplierRows?.[0]?.supplier ?? null) as unknown as SupplierLink | null,
   };
 });
 
@@ -71,33 +68,37 @@ export function activeMembership(ctx: SessionContext): Membership | undefined {
   return ctx.memberships.find((m) => m.status === "approved") ?? ctx.memberships[0];
 }
 
-export function isCaptain(ctx: SessionContext): boolean {
-  return ctx.memberships.some((m) => m.member_role === "captain" && m.status === "approved");
+export function ambassadorMembership(ctx: SessionContext): Membership | undefined {
+  return ctx.memberships.find((m) => m.member_role === "ambassador" && m.status === "approved");
+}
+
+export function isAmbassador(ctx: SessionContext): boolean {
+  return Boolean(ambassadorMembership(ctx));
 }
 
 /** Where a signed-in user lands. */
 export function homePath(ctx: SessionContext): string {
   if (ctx.profile.role === "admin") return "/admin";
+  if (ctx.profile.role === "agent") return "/agent";
   if (ctx.supplier) return "/supplier";
   if (ctx.memberships.length === 0) return "/onboarding";
   return "/resident";
 }
 
-type Area = "resident" | "captain" | "supplier" | "admin";
+export type Area = "resident" | "ambassador" | "agent" | "supplier" | "admin";
 
-/** Server-side guard for an area's layout. Redirects instead of rendering for the wrong role. */
+/** Server-side guard for an area's layout and actions. Redirects instead of rendering for the wrong role. */
 export async function requireArea(area: Area): Promise<SessionContext> {
   const ctx = await getSessionContext();
   if (!ctx) redirect(`/login?next=/${area}`);
 
-  const allowed =
-    area === "admin"
-      ? ctx.profile.role === "admin"
-      : area === "supplier"
-        ? Boolean(ctx.supplier)
-        : area === "captain"
-          ? isCaptain(ctx)
-          : ctx.memberships.length > 0;
+  const allowed = {
+    admin: ctx.profile.role === "admin",
+    agent: ctx.profile.role === "agent",
+    supplier: Boolean(ctx.supplier),
+    ambassador: isAmbassador(ctx),
+    resident: ctx.memberships.length > 0,
+  }[area];
 
   if (!allowed) redirect(homePath(ctx));
   return ctx;

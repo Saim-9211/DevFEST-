@@ -9,9 +9,9 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 const nastaliq = Noto_Nastaliq_Urdu({ variable: "--font-nastaliq", subsets: ["arabic"], weight: ["400", "700"] });
 
 export const metadata: Metadata = {
-  title: { default: "BulkBasket: buy groceries together", template: "%s · BulkBasket" },
+  title: { default: "CollectiveCart: your building buys together", template: "%s · CollectiveCart" },
   description:
-    "Community grocery group-buying for apartment buildings in Pakistan. Pool monthly orders, let wholesalers bid, save on staples.",
+    "Deposit-backed collective grocery buying for apartment buildings in Pakistan. Pool monthly orders, buy wholesale, pick up in your building.",
 };
 
 // The <html lang/dir> depends on the language cookie and every area depends on the session,

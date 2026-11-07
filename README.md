@@ -1,64 +1,91 @@
-# BulkBasket
+# CollectiveCart
 
-Community grocery group-buying for apartment buildings in Pakistan. Residents of a building pool their monthly orders. The platform combines demand across nearby buildings, verified wholesalers bid on it, and households get wholesale-level prices delivered to their building.
+A demand-led, deposit-backed grocery buying network for apartment buildings in Pakistan. Residents of a building order their monthly staples at fixed prices and pay a deposit before a cutoff. Buildings that reach the monthly minimum have their combined demand bought directly from verified wholesalers, with one drop-off per building. Residents pay the balance at pickup and collect with a one-time code. CollectiveCart holds no speculative inventory and earns the spread between the wholesale cost and the offer price.
 
-> The 20–30% saving is a **target**. The app always shows an *estimated* price first; the final price comes from supplier bids.
+> **Savings are per basket, not per item.** Unbranded commodities (daal, rice, atta, spices) are offered 14–22% below retail. Branded goods (oil, tea, dairy), where wholesale margins are only 3–8%, are offered 4–8% below. The demo basket saves about **11%** overall.
 
-**Stack:** Next.js 16 (App Router, TypeScript, Tailwind v4) · Supabase (Postgres + RLS, Auth) · zod · Vitest.
+**Stack:** Next.js 16 (App Router, TypeScript, Tailwind v4) · Supabase (Postgres + RLS, Auth, Storage, Realtime) · zod · Vitest · simulated Raast/JazzCash/Easypaisa gateway.
 
-## Status: Phase 1 (Foundation) is done
+## How a monthly cycle works
 
-| Area | What works |
+```
+draft ─► open ─► locked ─► ordered ─► dispatched ─► delivered ─► distributing ─► closed
+          │        │          │            │            │              │              │
+   residents   run_cutoff  issue POs   suppliers   ambassador    pickup: balance   no-shows
+   order +     (minimum    (deposit-   dispatch    checks in     (online or agent  forfeit
+   pay 20%     check,      backed      (auto-      drop-offs     cash) + OTP/QR    deposit
+   deposit     refunds,    demand      advances)   (auto-        handover
+               lots,       only)                   advances)
+               suppliers)
+ draft/open/locked ─► cancelled (every deposit refunded)
+```
+
+| Rule | Where it's enforced |
 |---|---|
-| Database | Full schema for all phases, RLS on every table, guard triggers, RPCs, cycle state machine with audit log |
-| Auth | Email + password sign-up and login. SMS one-time-code login (needs an SMS provider in Supabase). Every new account starts as a resident; metadata cannot grant a role |
-| Roles | Resident, Building Captain, Supplier, Admin. Each area has a server-side guard; RLS enforces the same rules in the database |
-| Onboarding | Join a building by invite code or request to join. Register a supplier business (unverified until an admin verifies it) |
-| Resident | Membership status (pending / approved / rejected) and the current cycle with cutoff countdown |
-| Captain | Invite code, approve or reject pending households, member list |
-| Supplier | Verification status |
-| Admin | Platform counts, verify suppliers, move cycles through the state machine (only legal moves are offered) |
-| i18n | English and Urdu (Nastaliq font, RTL), toggled from the header |
-| Seed | 13 categories, 55 Pakistani staples with retail benchmarks and tier estimates, 1 Lahore cluster, 3 buildings, 3 suppliers, 1 open cycle, 9 demo accounts |
+| Prices, totals, deposit (10–20%, rounded up) are computed by the server; client-sent values are ignored | `price_basket_item`, `_recalc_basket`, `guard_basket` |
+| Payments are confirmed only by the signed gateway webhook (service role) | `confirm_payment` + `/api/payments/webhook` (HMAC-SHA256) |
+| Unpaid orders are dropped at cutoff; buildings under the minimum (households **and** value) are cancelled and refunded | `run_cutoff` |
+| Purchase orders cover deposit-backed demand from buildings that met the minimum, and only from **verified** suppliers' rate cards (the cheapest that covers the volume) | `run_cutoff`, `issue_purchase_orders` |
+| Offers can't be priced below the best wholesale cost | `guard_offer` (loss guard) |
+| **Only authorized agents collect cash**, only for their assigned buildings, recorded on the spot with a receipt number. Ambassadors can't record payments | `record_cash_payment` |
+| Handover needs the balance paid in full plus the correct one-time code (hashed, 48h, 5 attempts) | `generate_pickup_otp`, `complete_handover` |
+| Returns: damaged/expired only, photo required, within 48h. Claims ≤ Rs 500 are credited instantly; larger ones go to a building return batch for admin review | `file_damage_claim`, `resolve_claim` |
+| A no-show forfeits the deposit; a second no-show switches the household to 100% upfront payment | `close_cycle` |
+| Store credit (from refunds) is spent against the next deposit or balance | `apply_credit` |
 
-Next up: **Phase 2** (catalog, basket, live building demand), then Phase 3 (aggregation, bidding, award), Phase 4 (delivery, OTP handover, disputes), Phase 5 (analytics, polish). Payments are deliberately out of scope for now: baskets carry a `payment_status` placeholder that defaults to cash on delivery.
+## Roles
+
+| Role | Can do |
+|---|---|
+| Resident | Order, pay the deposit, pay the balance, collect with OTP/QR, report damage, use credit |
+| Building Ambassador | Approve neighbours, watch live progress toward the minimum, check in drop-offs, run the pickup desk. **Never handles cash** |
+| Agent | Collect cash balances in assigned buildings (with receipts), hand over orders, see cash on hand |
+| Supplier | Submit rate cards before cutoff, accept and dispatch purchase orders |
+| Admin | Set up cycles and offers, run cutoff, override supplier choice, issue POs, reconcile agent cash, review returns, see KPIs |
+
+Resident and ambassador screens are in **English and Urdu (RTL)**. The staff consoles (admin, supplier, agent) are English only.
 
 ## Setup
 
 1. **Create a Supabase project** at [supabase.com](https://supabase.com).
-2. **Apply the database.** In the Supabase SQL Editor, run these files in order:
-   1. `supabase/migrations/20261107000100_schema.sql`
-   2. `supabase/migrations/20261107000200_security.sql`
-   3. `supabase/seed.sql`
-
-   Or use the CLI (no Docker needed for a remote project): `npx supabase login`, `npx supabase init`, `npx supabase link --project-ref <ref>`, `npx supabase db push`, then run `seed.sql` in the SQL Editor.
-3. **Auth settings** (Dashboard → Authentication):
-   - For a smooth demo, turn off **Confirm email** under Providers → Email.
-   - Add `http://localhost:3000/auth/callback` to the redirect URLs.
-   - SMS login needs **Phone** enabled with an SMS provider (e.g. Twilio). Email login works without it.
-4. **Environment:** `cp .env.example .env.local` and fill in the URL, the publishable (or anon) key, and the service-role key.
-5. **Install, create demo users and run:**
+2. **Apply the database.** In the SQL Editor, run these in order:
+   `supabase/migrations/20261107000100_schema.sql` → `20261107000200_security.sql` → `20261107000300_platform.sql` (claim-photo bucket + Realtime) → `supabase/seed.sql`.
+   Or use the CLI: `npx supabase link --project-ref <ref>`, then `npx supabase db push`, then run `seed.sql`.
+3. **Auth** (Dashboard → Authentication): turn off **Confirm email** for the demo, and add `http://localhost:3000/auth/callback` to the redirect URLs. SMS login additionally needs an SMS provider; email login works without one.
+4. **Environment:** `cp .env.example .env.local`, then fill in the Supabase URL, publishable/anon key, **service-role key** (used for payment confirmation and seeding) and a `PAYMENT_WEBHOOK_SECRET`.
+5. **Run:**
    ```bash
    npm install
-   npm run seed:users   # creates the demo accounts below
+   npm run seed:users   # demo accounts + 11 paid-deposit orders
    npm run dev          # http://localhost:3000
    ```
 
-### Demo accounts (password `BulkBasket#2026`, override with `DEMO_PASSWORD`)
+### Demo accounts (password `Collective#2026`, override with `DEMO_PASSWORD`)
 
-| Email | Role |
+| Email (`@demo.collectivecart.pk`) | Who |
 |---|---|
-| `admin@demo.bulkbasket.pk` | Admin (ops) |
-| `captain@demo.bulkbasket.pk` | Captain, Gulberg Heights, flat A-101 |
-| `ayesha@demo.bulkbasket.pk` | Resident, Gulberg Heights, A-204 |
-| `usman@demo.bulkbasket.pk` | Resident, Gulberg Heights, B-105 |
-| `hamza@demo.bulkbasket.pk` | Resident, **pending** approval (C-310) |
-| `fatima@demo.bulkbasket.pk` | Captain, Liberty Residency, L-12 |
-| `almadina@demo.bulkbasket.pk` | Supplier (verified) |
-| `shahalam@demo.bulkbasket.pk` | Supplier (verified) |
-| `punjabfmcg@demo.bulkbasket.pk` | Supplier (**unverified**, so the admin can verify it live) |
+| `admin@` | Admin (ops) |
+| `ayesha@` | Resident, Clifton Towers A-204, **no order yet** (use her for the live demo) |
+| `ambassador@` | Bilal, Ambassador of Clifton Towers (also has an order) |
+| `usman@`, `sadia@`, `farhan@`, `nida@`, `zain@`, `mehwish@`, `omar@` | Clifton residents with deposits paid |
+| `hamza@` | Clifton resident **pending** approval |
+| `fatima@` (ambassador), `kashif@`, `rabia@` | Jauhar Heights, 3 orders: **below the minimum** |
+| `agent@` | Kamran, cash agent for Clifton and Jauhar |
+| `jodia@`, `saddar@` | Verified suppliers |
+| `korangi@` | Unverified supplier (cheapest rate card, but never selected) |
 
-Building invite codes: `GULB2026`, `LIBR2026`, `MALL2026`.
+Invite codes: `CLIF2026`, `JAUH2026`, `PECH2026`.
+
+After seeding, Clifton has **8 households and about Rs 115k**, just under its Rs 120k minimum. Jauhar has 3 households.
+
+### Demo script (about 6 minutes)
+
+1. **Ayesha** opens the catalog and adds staples. The basket shows about 11% saved vs retail, a 20% deposit, and the balance due at pickup. She pays the deposit through the mock **Raast** checkout.
+2. **Ambassador** dashboard: Clifton's progress bar turns green (9 households, over Rs 120k). It updates live.
+3. **Admin**, control room → **Run cutoff**. Jauhar is auto-cancelled and refunded; Clifton's demand becomes lots with suppliers auto-selected (Korangi is skipped as unverified). The cycle page shows the margin per lot and the surplus stock. Then **Issue purchase orders**.
+4. **jodia@ / saddar@** accept and dispatch their POs (the cycle moves on automatically). The **Ambassador** checks in both drop-offs. **Admin** clicks **Open pickup**.
+5. **Ayesha** pays the balance with mock **JazzCash** and opens her pickup code and QR. The **Ambassador** enters the code and hands over. **Usman** has no online payment: the **agent** collects cash (receipt `RC-…`) and hands over.
+6. **Ayesha** reports a damaged salt pack with a photo and gets instant credit. **Admin** closes the cycle: the households that didn't collect become no-shows and their deposits are forfeited. **Payments & cash** reconciles the agent's cash, and the KPIs show GMV, savings %, margin, refunds and forfeits.
 
 ## Scripts
 
@@ -66,37 +93,17 @@ Building invite codes: `GULB2026`, `LIBR2026`, `MALL2026`.
 |---|---|
 | `npm run dev` / `build` / `start` | Next.js |
 | `npm run typecheck` / `lint` | TypeScript and ESLint |
-| `npm test` | Unit tests (pricing math, phone normalisation) |
-| `npm run db:test` | Applies migrations and seed to a scratch PostgreSQL database and runs the RLS / business-rule suite (`supabase/tests/rls_test.sql`). Needs a plain PostgreSQL server; set `PGHOST`, `PGPORT`, `PGUSER` (defaults: `localhost:54329`, `postgres`) |
-| `npm run seed:users` | Creates or updates the demo accounts (uses the service-role key) |
+| `npm test` | Unit tests: pricing (basket totals, deposit split, margin, minimums), webhook signing, phone numbers |
+| `npm run db:test` | Applies the migrations and seed to a scratch PostgreSQL and runs the full V2 business-rule and RLS suite (`supabase/tests/rls_test.sql`), covering the whole cycle end to end. Needs a plain PostgreSQL server; set `PGHOST`, `PGPORT`, `PGUSER` (defaults `localhost:54329`, `postgres`) |
+| `npm run seed:users` | Demo accounts and paid-deposit orders (service-role key) |
 
-## How it's built
+## Payments
 
-```
-src/
-  proxy.ts                  session refresh + optimistic redirect for protected areas (Next 16 "proxy" = middleware)
-  app/
-    page.tsx                landing page
-    (auth)/login, signup    email/password + SMS one-time code
-    auth/callback           email-confirmation code exchange
-    onboarding/             join building / register supplier
-    resident/ captain/ supplier/ admin/   role areas; each layout calls requireArea()
-  lib/
-    auth.ts                 session context, role helpers, requireArea()
-    pricing.ts              tier and savings math (mirrors the SQL)
-    i18n/                   en/ur dictionaries, locale cookie
-    supabase/               server, browser and proxy clients
-supabase/
-  migrations/               schema, security (RLS, triggers, RPCs)
-  seed.sql                  demo catalog and data
-  tests/                    local Supabase shim + RLS test suite
-scripts/seed-users.ts       demo accounts
-```
+All gateways are **simulated**: `/resident/pay/[id]` plays the Raast/JazzCash/Easypaisa side and sends a **signed** event through the same handler as `/api/payments/webhook`. To go live, implement checkout creation in `src/lib/payments/gateway.ts` for each provider and point its callback at the webhook, translating its payload into a `GatewayEvent`. The database already rejects wrong amounts, late deposits and replayed events.
 
-### Security model
+## Known limitations / next steps
 
-- **RLS everywhere.** Residents see only their own baskets, captains see only their own building, and suppliers never see resident identities or household orders.
-- **Server-computed fields.** Estimated prices, final prices, verification flags, roles and basket/payment status are set by triggers or security-definer RPCs. Client-supplied values are overwritten or rejected.
-- **One household per flat.** A partial unique index blocks duplicate or fake sign-ups for the same flat.
-- **Audited state machine.** Buying cycles can only move along the edges in `cycle_transitions`, and every move is written to `cycle_events`.
-- **Service-role key stays server-side.** It is used only by `scripts/seed-users.ts`, never by the app.
+- **Surplus stock.** Suppliers sell whole cartons and sacks, so leftover units are real working capital at building scale (shown as "surplus stock" in the KPIs). Options: rate cards with loose/broken-carton pricing, cluster-level pooling of leftovers, or offering surplus in the next cycle (not built yet).
+- Notifications are in-app only. WhatsApp/SMS delivery is the next adapter to add.
+- Cutoff runs from an admin button. Schedule it with `pg_cron` for production.
+- Staff consoles aren't translated to Urdu.
