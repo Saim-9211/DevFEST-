@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { getDictionary } from "@/lib/i18n";
-import { isSupabaseConfigured } from "@/lib/env";
+import { isSupabaseConfigured, missingSupabaseEnv } from "@/lib/env";
 import { ActionForm, SubmitButton } from "@/components/form";
 import { Card, Field, Input, Notice } from "@/components/ui/primitives";
 import { signInWithPassword } from "../actions";
@@ -18,7 +18,11 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
     <div className="mx-auto max-w-md px-4 py-12">
       <Card className="space-y-6 p-6">
         <h1 className="text-2xl font-semibold">{t.auth.loginTitle}</h1>
-        {!isSupabaseConfigured ? <Notice tone="error">{t.auth.notConfigured}</Notice> : null}
+        {!isSupabaseConfigured ? (
+          <Notice tone="error">
+            {t.auth.notConfigured} <code className="font-mono text-xs">{missingSupabaseEnv().join(", ")}</code>
+          </Notice>
+        ) : null}
 
         <ActionForm action={signInWithPassword}>
           <input type="hidden" name="next" value={next} />

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { getDictionary } from "@/lib/i18n";
-import { isSupabaseConfigured } from "@/lib/env";
+import { isSupabaseConfigured, missingSupabaseEnv } from "@/lib/env";
 import { ActionForm, SubmitButton } from "@/components/form";
 import { Card, Field, Input, Notice } from "@/components/ui/primitives";
 import { signUp } from "../actions";
@@ -20,7 +20,11 @@ export default async function SignupPage({ searchParams }: PageProps<"/signup">)
           <h1 className="text-2xl font-semibold">{t.auth.signupTitle}</h1>
           {asSupplier ? <p className="mt-1 text-sm text-muted-foreground">{t.onboarding.supplierBody}</p> : null}
         </div>
-        {!isSupabaseConfigured ? <Notice tone="error">{t.auth.notConfigured}</Notice> : null}
+        {!isSupabaseConfigured ? (
+          <Notice tone="error">
+            {t.auth.notConfigured} <code className="font-mono text-xs">{missingSupabaseEnv().join(", ")}</code>
+          </Notice>
+        ) : null}
 
         <ActionForm action={signUp}>
           {asSupplier ? <input type="hidden" name="as" value="supplier" /> : null}

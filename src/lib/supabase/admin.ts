@@ -7,7 +7,7 @@ import { SUPABASE_URL } from "@/lib/env";
  * i.e. confirming payments from the (simulated) gateway webhook.
  */
 export function createAdminClient() {
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!SUPABASE_URL || !key) {
     throw new Error("SUPABASE_SERVICE_ROLE_KEY is not set; payment confirmation needs it (see .env.example).");
   }
